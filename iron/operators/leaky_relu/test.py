@@ -65,3 +65,11 @@ def test_leaky_relu(
     print(f"Effective Bandwidth: {bandwidth_gbps:.6e} GB/s\n")
 
     assert not errors, f"Test failed with errors: {errors}"
+
+
+def test_leaky_relu_parametrize_not_empty():
+    """Bead: nd-mek."""
+    assert regular_params, (
+        "leaky_relu must provide at least one non-extensive parameter set so "
+        "PR CI exercises the operator instead of reporting an empty-param skip"
+    )
