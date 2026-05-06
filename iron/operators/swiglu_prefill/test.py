@@ -93,3 +93,11 @@ def test_swiglu_prefill(seq_len, embedding_dim, hidden_dim, prio_accuracy, aie_c
         errors["output"] = errors_3
 
     assert not errors, f"Test failed with errors: {errors}"
+
+
+def test_swiglu_prefill_parametrize_not_empty():
+    """Bead: nd-uh8."""
+    assert regular_params, (
+        "swiglu_prefill must provide at least one non-extensive parameter set "
+        "so PR CI exercises the operator instead of reporting an empty-param skip"
+    )
