@@ -97,7 +97,12 @@ def test_swiglu_prefill(seq_len, embedding_dim, hidden_dim, prio_accuracy, aie_c
 
 def test_swiglu_prefill_parametrize_not_empty():
     """Bead: nd-uh8."""
-    assert regular_params, (
+    non_extensive_params = [
+        p
+        for p in get_params()
+        if not any(getattr(mark, "name", "") == "extensive" for mark in p.marks)
+    ]
+    assert non_extensive_params, (
         "swiglu_prefill must provide at least one non-extensive parameter set "
         "so PR CI exercises the operator instead of reporting an empty-param skip"
     )
