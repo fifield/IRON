@@ -20,8 +20,6 @@ from iron.common import (
 
 from iron.operators.flm.prefill_attn.design import (
     CAUSAL,
-    IN_CONS_LOCK,
-    IN_PROD_LOCK,
     SLIDING,
     Geometry,
     Variant,
@@ -78,9 +76,7 @@ class _PrefillAttentionBase(MLIROperator):
 
     @property
     def head_dim(self) -> int:
-        return Geometry.of(
-            self.variant.factory(in_prod_lock=IN_PROD_LOCK, in_cons_lock=IN_CONS_LOCK)
-        ).dh
+        return Geometry.of(self.variant.factory()).dh
 
     @property
     def name(self) -> str:
@@ -112,18 +108,12 @@ class _PrefillAttentionBase(MLIROperator):
                     self.num_kv_heads,
                     self.window,
                 ),
-                {
-                    "kernel": self.variant.factory(
-                        in_prod_lock=IN_PROD_LOCK, in_cons_lock=IN_CONS_LOCK
-                    )
-                },
+                {"kernel": self.variant.factory()},
             ),
         )
 
     def get_kernel_artifacts(self):
-        kernel = self.variant.factory(
-            in_prod_lock=IN_PROD_LOCK, in_cons_lock=IN_CONS_LOCK
-        )
+        kernel = self.variant.factory()
         return [KernelObjectArtifact.from_extern(kernel)]
 
     def get_arg_spec(self):

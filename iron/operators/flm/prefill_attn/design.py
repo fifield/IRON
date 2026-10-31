@@ -22,7 +22,7 @@ import numpy as np
 from ml_dtypes import bfloat16
 
 from aie.dialects import arith
-from aie.dialects.aie import DMAChannelDir
+from aie.dialects.aie import DMAChannelDir, Port
 from aie.dialects.aiex import (
     _as_i32,
     dma_free_task,
@@ -47,7 +47,7 @@ from aie.iron import (
     TileDma,
     Worker,
 )
-from aie.iron.controlflow import range_
+from aie.iron.controlflow import else_, if_, range_
 from aie.iron.dataflow import Flow
 from aie.iron.device import Tile
 from aie.iron.kernels import flm_gemma4
@@ -77,7 +77,7 @@ class Geometry:
     def of(cls, kernel):
         """Read the shapes from the argument types of the kernel's entry points."""
         lq, dh = np_ndarray_type_get_shape(kernel.attn_round_begin.arg_types()[4])
-        lk, _ = np_ndarray_type_get_shape(kernel.attn_qk_step.arg_types()[2])
+        lk, _ = np_ndarray_type_get_shape(kernel.attn_qk_chunk.arg_types()[2])
         return cls(dh=dh, lq=lq, lk=lk)
 
 
@@ -304,13 +304,16 @@ def prefill_attn(
     """Prefill attention over a KV cache of up to max_context rows.
 
     The README gives the layout of O, Q and KV. ``kernel`` is the variant's
-    factory's build with the locks IN_PROD_LOCK and IN_CONS_LOCK.
+    factory's build; this graph owns the k/v buffer locks.
     """
     v = VARIANTS[variant]
     if v.windowed != (window is not None):
         need = "needs a" if v.windowed else "takes no"
         raise ValueError(f"the {v.name} variant {need} window")
     g = Geometry.of(kernel)
+    # Each key and value phase consumes an even number of chunks, so the
+    # shared DMA ping/pong pair starts at in0 in every phase and block.
+    assert (LK_MT // g.lk) % 2 == 0
     group_cols = dev.cols // v.num_cu
     gqa = num_heads // num_kv_heads
     # Elements per token in Q and O, and in each of k and v.
@@ -322,7 +325,7 @@ def prefill_attn(
     lq_mt = 4 * g.lq
 
     # The core's buffers take the kernel's argument types.
-    s_ty, q_ty, in_ty, _, m_ty, L_ty = kernel.attn_qk_step.arg_types()[:6]
+    s_ty, q_ty, in_ty, m_ty, L_ty = kernel.attn_qk_chunk.arg_types()[:5]
     mv_ty, _, cv_ty, _, y_ty = kernel.attn_round_begin.arg_types()
     o_ty, l_bf16_ty, _, _ = kernel.attn_epilogue.arg_types()
     q_half_ty = np.ndarray[(lq_mt, g.dh), bf16]
@@ -466,7 +469,7 @@ def prefill_attn(
     o_shim, o_prod = [], {}
     for m in range(dev.cols):
         of_o = ObjectFifo(o_col_ty, name=f"o{m}", depth=2)
-        o_shim.append(of_o.cons(tile=IT[m], channel=0))
+        o_shim.append(of_o.cons(tile=IT[m], port=Port.dma(0)))
         sub = of_o.prod().join(
             [g.lq * g.dh * i for i in range(4)],
             obj_types=[o_ty] * 4,
@@ -487,7 +490,7 @@ def prefill_attn(
         mt_idx = v.q_memtile(p)
         for half, rows in ((0, (0, 1)), (1, (2, 3))):
             of_q = ObjectFifo(q_half_ty, name=f"q{mt_idx}_{half}", depth=2)
-            q_shim[(p, half)] = of_q.prod(tile=IT[mt_idx], channel=half)
+            q_shim[(p, half)] = of_q.prod(tile=IT[mt_idx], port=Port.dma(half))
             slices = of_q.cons().split(
                 [lq_ct * g.dh * t for t in range(2)],
                 obj_types=[q_ty] * 2,
@@ -547,6 +550,8 @@ def prefill_attn(
             finalize_k,
             epilogue_k,
             go_lock,
+            in_prod_lock,
+            in_cons_lock,
         ):
             go_lock.acquire(1)
             rounds_k(lb, le, n_buf)
@@ -558,11 +563,21 @@ def prefill_attn(
                     block_begin_k(m, prev_m)
                     for j in range_(LK_MT // g.lk):
                         _no_unroll(j)
-                        qk_k(s, q, in0, in1, m, lb, ws, row, col, i, b, j)
+                        in_cons_lock.acquire(1)
+                        with if_(j % 2 == 0) as branch:
+                            qk_k(s, q, in0, m, lb, ws, row, col, i, b, j)
+                        with else_(branch):
+                            qk_k(s, q, in1, m, lb, ws, row, col, i, b, j)
+                        in_prod_lock.release(1)
                     block_mid_k(s, m, new_m, prev_m, cbuf, lbuf, y)
                     for j in range_(LK_MT // g.lk):
                         _no_unroll(j)
-                        fv_k(y, s, in0, in1, j)
+                        in_cons_lock.acquire(1)
+                        with if_(j % 2 == 0) as branch:
+                            fv_k(y, s, in0, j)
+                        with else_(branch):
+                            fv_k(y, s, in1, j)
+                        in_prod_lock.release(1)
                     block_end_k(prev_m, new_m)
                 finalize_k(lbuf, l_bf16)
                 if v.release_q_before_epilogue:
@@ -622,13 +637,15 @@ def prefill_attn(
                         kernel.attn_round_begin,
                         kernel.attn_blocks,
                         kernel.attn_block_begin,
-                        kernel.attn_qk_step,
+                        kernel.attn_qk_chunk,
                         kernel.attn_block_mid,
-                        kernel.attn_fv_step,
+                        kernel.attn_fv_chunk,
                         kernel.attn_block_end,
                         kernel.attn_finalize,
                         kernel.attn_epilogue,
                         go_lock,
+                        in_prod,
+                        in_cons,
                     ],
                     tile=tile,
                     while_true=True,
