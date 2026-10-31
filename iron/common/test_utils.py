@@ -214,9 +214,11 @@ def run_test(
             raise ValueError(f"Unsupported direction: {spec.direction}")
 
     benchmark = run_iters(op_func, *args, warmup=warmup_iters, iters=timed_iters)
-    if benchmark.npu is None:
-        raise RuntimeError("Operator callable did not report NPU execution time")
-    latency_us = benchmark.npu.avg_us
+    # Preserve submit-to-completion latency (formerly benchmark.npu).
+    # Upstream now reserves npu for dispatch minus empty-dispatch overhead.
+    if benchmark.dispatch is None:
+        raise RuntimeError("Operator callable did not report dispatch execution time")
+    latency_us = benchmark.dispatch.avg_us
 
     # Verify outputs
     errors = {}

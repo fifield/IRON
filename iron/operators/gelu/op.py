@@ -18,7 +18,7 @@ class GELU(ChanneledUnaryOperator):
     stack_size: ClassVar[int] = 2048
 
     def _kernel(self):
-        return activation.gelu_sized(self._line_size)
+        return activation.gelu(self._line_size)
 
     def reference(self, x):
         from iron.operators.gelu.reference import reference

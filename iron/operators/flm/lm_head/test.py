@@ -61,7 +61,8 @@ def _print_metrics(op, run, bufs):
     """
     total_bytes = sum(b.numpy().nbytes for b in bufs)
     flops = 2 * op.vocab * op.dim
-    latency_us = run_iters(run, *bufs, warmup=1, iters=1).npu.avg_us
+    # Submit-to-completion latency, including dispatch overhead as before.
+    latency_us = run_iters(run, *bufs, warmup=1, iters=1).dispatch.avg_us
     print(f"\nLatency (us): {latency_us:.1f}")
     print(f"Effective Bandwidth: {total_bytes / latency_us / 1e3:.6e} GB/s")
     print(f"Throughput: {flops / latency_us / 1e3:.6e} GFLOP/s\n")

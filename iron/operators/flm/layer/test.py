@@ -127,7 +127,8 @@ def _print_metrics(run, bufs, geometry, layer_type, context_len):
     total_bytes = 2 * (sum(w.size for w in blob) + 2 * keys * g["dk"])
     flops = 2 * sum(w.dout * w.din for w in blob)
     flops += 4 * g["num_attn_heads"] * g["dh"] * keys
-    latency_us = run_iters(run, *bufs, warmup=1, iters=1).npu.avg_us
+    # Submit-to-completion latency, including dispatch overhead as before.
+    latency_us = run_iters(run, *bufs, warmup=1, iters=1).dispatch.avg_us
     print(f"\nLatency (us): {latency_us:.1f}")
     print(f"Effective Bandwidth: {total_bytes / latency_us / 1e3:.6e} GB/s")
     print(f"Throughput: {flops / latency_us / 1e3:.6e} GFLOP/s\n")

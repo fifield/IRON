@@ -90,7 +90,8 @@ def _print_metrics(op, run, bufs, L_begin, L_end):
         2 * dh * (2 * (L_end - L_begin) * NUM_HEADS + 2 * rows_read * op.num_kv_heads)
     )
     flops = 4 * NUM_HEADS * dh * int(keys.sum())
-    latency_us = run_iters(run, *bufs, warmup=1, iters=1).npu.avg_us
+    # Submit-to-completion latency, including dispatch overhead as before.
+    latency_us = run_iters(run, *bufs, warmup=1, iters=1).dispatch.avg_us
     print(f"\nLatency (us): {latency_us:.1f}")
     print(f"Effective Bandwidth: {total_bytes / latency_us / 1e3:.6e} GB/s")
     print(f"Throughput: {flops / latency_us / 1e3:.6e} GFLOP/s\n")

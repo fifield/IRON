@@ -18,7 +18,7 @@ class SiLU(ChanneledUnaryOperator):
     callback_fn: ClassVar[str] = "my_silu"
 
     def _kernel(self):
-        return activation.silu_sized(self._line_size)
+        return activation.silu(self._line_size)
 
     def reference(self, x):
         from iron.operators.silu.reference import reference

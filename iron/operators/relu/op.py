@@ -16,7 +16,7 @@ class ReLU(ChanneledUnaryOperator):
     callback_fn: ClassVar[str] = "my_relu"
 
     def _kernel(self):
-        return eltwise.relu_sized(self._line_size)
+        return eltwise.relu(self._line_size)
 
     def reference(self, x):
         from iron.operators.relu.reference import reference
